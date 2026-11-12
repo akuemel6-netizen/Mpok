@@ -1,0 +1,225 @@
+-- Check for table that is shared between executions.
+if not shared then
+	return warn("No shared, no script.")
+end
+
+-- Initialize Luraph globals if they do not exist.
+loadstring("getfenv().LPH_NO_VIRTUALIZE = function(...) return ... end")()
+getfenv().PP_SCRAMBLE_NUM = function(...) return ... end
+getfenv().PP_SCRAMBLE_STR = function(...) return ... end
+getfenv().PP_SCRAMBLE_RE_NUM = function(...) return ... end
+
+local ArdHub = { queued = false, silent = false }
+
+-- Services.
+local playersService = game:GetService("Players")
+local runService = game:GetService("RunService")
+local replicatedStorage = game:GetService("ReplicatedStorage")
+local workspace = game:GetService("Workspace")
+
+local localPlayer = playersService.LocalPlayer
+
+-- State.
+local state = {
+	match = {},
+	performance = {},
+	player = {},
+	lobby = {},
+	macro = {},
+	antiBan = {}
+}
+
+local Network = {}
+
+---Fire a remote event safely.
+---@param remoteName string
+function Network.fireEvent(remoteName, ...)
+	local remote = replicatedStorage:FindFirstChild(remoteName, true)
+	if remote and remote:IsA("RemoteEvent") then
+		remote:FireServer(...)
+	end
+end
+
+---Invoke a remote function safely.
+---@param remoteName string
+function Network.invokeFunction(remoteName, ...)
+	local remote = replicatedStorage:FindFirstChild(remoteName, true)
+	if remote and remote:IsA("RemoteFunction") then
+		return remote:InvokeServer(...)
+	end
+end
+
+---Main loop for match automation.
+local function onRenderStepped()
+	if state.match.skipWave then
+		Network.fireEvent("SkipWave")
+		Network.fireEvent("VoteSkip")
+	end
+
+	if state.match.speed2x then
+		Network.fireEvent("SetSpeed", 2)
+	elseif state.match.speed3x then
+		Network.fireEvent("SetSpeed", 3)
+	end
+
+	if state.match.autoAbility then
+		Network.fireEvent("UseAllAbilities")
+	end
+	
+	if state.match.autoReplay then
+		Network.fireEvent("ReplayMatch")
+	end
+	
+	if state.match.autoReturn then
+		Network.fireEvent("ReturnToLobby")
+	end
+end
+
+---This is called when initialization errors.
+---@param error string
+local function onInitializeError(error)
+	warn("Failed to initialize.")
+	warn(error)
+	warn(debug.traceback())
+end
+
+---Main initialization.
+local function initializeScript()
+	local rayfieldReq = request({Url = "https://sirius.menu/rayfield", Method = "GET"})
+	local Rayfield = loadstring(rayfieldReq.Body)()
+
+	local Window = Rayfield:CreateWindow({
+		Name = "Garden Tower Defense | Ard Hub by Ardhi | v2.5.5",
+		LoadingTitle = "Ard Hub",
+		LoadingSubtitle = "Garden Tower Defense",
+		ConfigurationSaving = {
+			Enabled = true,
+			FolderName = "ArdHubGTD",
+			FileName = "Config"
+		},
+		KeySystem = false
+	})
+
+	local MatchTab = Window:CreateTab("Match", "swords")
+	local AutoModeTab = Window:CreateTab("Auto Mode", "bot")
+	local MacroTab = Window:CreateTab("Macro", "file-code")
+	local AntiBanTab = Window:CreateTab("Anti Ban", "shield")
+
+	MatchTab:CreateSection("Match")
+
+	MatchTab:CreateToggle({
+		Name = "Auto Skip Cutscene",
+		CurrentValue = false,
+		Callback = function(val)
+			state.match.skipCutscene = val
+			if val then Network.fireEvent("SkipCutscene") end
+		end,
+	})
+
+	MatchTab:CreateToggle({
+		Name = "Auto Skip Wave",
+		CurrentValue = false,
+		Callback = function(val) state.match.skipWave = val end,
+	})
+
+	MatchTab:CreateToggle({
+		Name = "Auto 2x Speed",
+		CurrentValue = false,
+		Callback = function(val) state.match.speed2x = val end,
+	})
+
+	MatchTab:CreateToggle({
+		Name = "Auto 3x Speed",
+		CurrentValue = false,
+		Callback = function(val) state.match.speed3x = val end,
+	})
+
+	MatchTab:CreateToggle({
+		Name = "Auto Ability",
+		CurrentValue = false,
+		Callback = function(val) state.match.autoAbility = val end,
+	})
+
+	MatchTab:CreateToggle({
+		Name = "Auto Replay",
+		CurrentValue = false,
+		Callback = function(val) state.match.autoReplay = val end,
+	})
+
+	MatchTab:CreateToggle({
+		Name = "Auto Return",
+		CurrentValue = false,
+		Callback = function(val) state.match.autoReturn = val end,
+	})
+
+	MatchTab:CreateSection("Performance")
+
+	MatchTab:CreateToggle({
+		Name = "Disable 3D Rendering",
+		CurrentValue = false,
+		Callback = function(val)
+			state.performance.disable3d = val
+			runService:Set3dRenderingEnabled(not val)
+		end,
+	})
+
+	AutoModeTab:CreateSection("Lobby")
+
+	AutoModeTab:CreateDropdown({
+		Name = "Difficulty",
+		Options = {"Normal", "Hard", "Nightmare"},
+		CurrentOption = {"Normal"},
+		MultipleOptions = false,
+		Callback = function(opt) 
+			state.lobby.difficulty = opt[1]
+			Network.fireEvent("SelectDifficulty", opt[1])
+		end,
+	})
+
+	AutoModeTab:CreateToggle({
+		Name = "Auto Difficulty",
+		CurrentValue = false,
+		Callback = function(val) state.lobby.autoDifficulty = val end,
+	})
+
+	MacroTab:CreateSection("Record / Play")
+
+	MacroTab:CreateToggle({
+		Name = "Record Macro",
+		CurrentValue = false,
+		Callback = function(val) state.macro.recording = val end,
+	})
+
+	MacroTab:CreateToggle({
+		Name = "Play Macro",
+		CurrentValue = false,
+		Callback = function(val) state.macro.playing = val end,
+	})
+
+	AntiBanTab:CreateSection("Anti Ban")
+
+	AntiBanTab:CreateToggle({
+		Name = "Anti Ban",
+		CurrentValue = false,
+		Callback = function(val) state.antiBan.enabled = val end,
+	})
+
+	AntiBanTab:CreateSlider({
+		Name = "Placement Spread",
+		Range = {0.3, 2.0},
+		Increment = 0.1,
+		Suffix = "studs",
+		CurrentValue = 0.3,
+		Callback = function(val) state.antiBan.placementSpread = val end,
+	})
+
+	Rayfield:LoadConfiguration()
+	runService.RenderStepped:Connect(onRenderStepped)
+end
+
+if shared.ArdHub then
+	shared.ArdHub.queued = false
+end
+
+shared.ArdHub = ArdHub
+return xpcall(initializeScript, onInitializeError)
